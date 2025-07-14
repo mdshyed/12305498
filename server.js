@@ -1,45 +1,60 @@
-require('dotenv').config();
-const express = require("express");
-const url_model = require("./models/shorturl.js");
-const connectDB = require("./models/db.js");
-const methodOverride = require("method-override");
+import express from 'express';
+import mongoose from 'mongoose';
+import connectDB from './models/db.js';
+import Url from './models/shorturl.js';
+
 const app = express();
 
-
-app.set("view engine", "ejs");
 app.use(express.urlencoded({ extended: false }));
-app.use(methodOverride("_method"));
+app.use(express.json());
 
-// Routes
-app.get("/", async (req, res) => {
-  const urlLists = await url_model.find();
-  res.render("index", { shorturls: urlLists });
+// Helper to generate a random shortcode
+function generateShortcode(length = 6) {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Get all short URLs (API)
+app.get('/shorturls', async (req, res) => {
+  const urls = await Url.find();
+  res.json(urls);
 });
 
-app.post("/shorturls", async (req, res) => {
-  await url_model.create({ full: req.body.fullUrl });
-  res.redirect("/");
+// Create a new short URL (API)
+app.post('/shorturls', async (req, res) => {
+  let inputUrl = req.body.url;
+  if (!inputUrl) return res.status(400).json({ error: 'Missing url field' });
+  if (!/^https?:\/\//i.test(inputUrl)) {
+    inputUrl = 'http://' + inputUrl;
+  }
+  const shortcode = generateShortcode();
+  const doc = await Url.create({ full: inputUrl, short: shortcode });
+  res.status(201).json(doc);
 });
 
-app.get("/:shorturl", async (req, res) => {
-  const shorturl = await url_model.findOne({ short: req.params.shorturl });
-  if (shorturl == null) return res.sendStatus(404);
-
-  shorturl.clicks++;
-  shorturl.save();
-
-  await res.redirect(shorturl.full);
+// Redirect to the original URL
+app.get('/:short', async (req, res) => {
+  const url = await Url.findOne({ short: req.params.short });
+  if (!url) return res.sendStatus(404);
+  res.redirect(url.full);
 });
 
-app.delete("/:id", async (req, res) => {
-  const id = req.params.id;
-  const deleteAction = await url_model.findOneAndDelete({ _id: id });
-  if (deleteAction == null) return res.sendStatus(404);
-  res.redirect("/");
+// Delete a short URL (API)
+app.delete('/shorturls/:id', async (req, res) => {
+  const deleted = await Url.findByIdAndDelete(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Not found' });
+  res.json({ success: true });
 });
 
-connectDB().then(() => {
+
+
   app.listen(process.env.PORT, () => {
-    console.log(`Server is running on PORT ${process.env.PORT}`);
+    connectDB()   
+    console.log(`Server running on ${process.env.PORT}`);
   });
-});
+
+
